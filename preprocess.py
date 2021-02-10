@@ -39,15 +39,14 @@ def preprocess_amzn(domain, split):
 
 
 def main():
-    # imdb_train_df = preprocess_imdb("train")
-    # imdb_dev_df = preprocess_imdb("test")
-    #
-    # imdb_train_df.to_csv("./data/imdb_train.tsv", sep="\t", index=False)
-    # imdb_dev_df.to_csv("./data/imdb_dev.tsv", sep="\t", index=False)
-    # print(imdb_train_df.head())
-    # print(imdb_train_df.shape)
-    # print(imdb_dev_df.head())
-    # print(imdb_dev_df.shape)
+    imdb_train_df = preprocess_imdb("train")
+    imdb_dev_df = preprocess_imdb("test")
+    imdb_train_df.to_csv("./data/imdb_train.tsv", sep="\t", index=False)
+    imdb_dev_df.to_csv("./data/imdb_dev.tsv", sep="\t", index=False)
+    print(imdb_train_df.head())
+    print(imdb_train_df.shape)
+    print(imdb_dev_df.head())
+    print(imdb_dev_df.shape)
     domain = 'books'
     amazon_train_df = preprocess_amzn(domain, "train")
     amazon_dev_df = preprocess_amzn(domain, "test")
