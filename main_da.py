@@ -281,7 +281,7 @@ def main():
         'device': device,
         'domain': domain,
         "num_labels": 2,
-        "hidden_dropout_prob": 0.15,
+        "hidden_dropout_prob": 0.2,
         "hidden_size": 768,
         "max_length": 512,
     }
@@ -290,7 +290,7 @@ def main():
         "batch_size": 2,
         "epochs": 1,
         "output_folder": "./models/",
-        "output_file": "model.bin",
+        "output_file": "model.pt",
         "learning_rate": 2e-5,
         "print_after_steps": 5,
         "save_steps": 5000,
@@ -301,6 +301,7 @@ def main():
     source_dataloader = DataLoader(dataset=source_dataset,
                                    batch_size=training_params["batch_size"],
                                    shuffle=True,
+                                   drop_last=True,
                                    num_workers=2)
 
     amazon_df = pd.read_csv(f"./data/amzn_{domain}_train.tsv", sep="\t")
@@ -308,6 +309,7 @@ def main():
     target_dataloader = DataLoader(dataset=target_dataset,
                                    batch_size=training_params["batch_size"],
                                    shuffle=True,
+                                   drop_last=True,
                                    num_workers=2)
 
     model = train(training_params, config, source_dataloader, target_dataloader)
