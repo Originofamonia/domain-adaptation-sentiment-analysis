@@ -123,7 +123,8 @@ def compute_accuracy(logits, labels):
     return acc, predicted_labels_dict
 
 
-def inference(model, training_parameters, device, dataset="imdb", percentage=5):
+def inference(model, training_parameters, config, dataset="imdb", percentage=5):
+    device = config['device']
     with torch.no_grad():
         predicted_labels_dict = {
             0: 0,
@@ -134,7 +135,7 @@ def inference(model, training_parameters, device, dataset="imdb", percentage=5):
         data_size = dev_df.shape[0]
         selected_for_evaluation = int(data_size * percentage / 100)
         dev_df = dev_df.head(selected_for_evaluation)
-        dataset = ReviewDataset(dev_df)
+        dataset = ReviewDataset(dev_df, config)
 
         dataloader = DataLoader(dataset=dataset, batch_size=training_parameters["batch_size"], shuffle=True,
                                 num_workers=2)
@@ -239,6 +240,7 @@ def training(training_parameters, config, source_dataloader, target_dataloader):
 
             # Note that we are not using the sentiment predictions here for updating the weights
             y_t_domain = torch.ones(training_parameters["batch_size"], dtype=torch.long).to(device)
+            print(domain_pred.size(), y_t_domain.size())
             loss_t_domain = loss_fn_domain_classifier(domain_pred, y_t_domain)
 
             # Combining the loss
@@ -251,10 +253,10 @@ def training(training_parameters, config, source_dataloader, target_dataloader):
 
         torch.save(model.state_dict(), os.path.join(training_parameters["output_folder"],
                                                     "epoch_" + str(epoch_idx) + training_parameters["output_file"]))
-        accuracy = inference(model, dataset="amazon", percentage=1).item()
+        accuracy = inference(model, training_parameters, config, dataset="amazon", percentage=1).item()
         print("Accuracy on amazon after epoch " + str(epoch_idx) + " is " + str(accuracy))
 
-        accuracy = inference(model, dataset="imdb", percentage=1).item()
+        accuracy = inference(model, training_parameters, config, dataset="imdb", percentage=1).item()
         print("Accuracy on imdb after epoch " + str(epoch_idx) + " is " + str(accuracy))
 
     return model
