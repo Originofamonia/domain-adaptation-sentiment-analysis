@@ -27,6 +27,7 @@ class ReviewDataset(Dataset):
         encoded_input = self.tokenizer.encode_plus(
             review,
             add_special_tokens=True,
+            truncation=True,
             max_length=self.config["max_length"],
             pad_to_max_length=True,
             return_overflowing_tokens=True,
@@ -253,9 +254,8 @@ def train(training_parameters, config, source_dataloader, target_dataloader):
             optimizer.step()
 
         # Evaluate the model after every epoch
-
-        torch.save(model.state_dict(), os.path.join(training_parameters["output_folder"],
-                                                    "epoch_" + str(epoch_idx) + training_parameters["output_file"]))
+        # torch.save(model.state_dict(), os.path.join(training_parameters["output_folder"],
+        #                                             "epoch_" + str(epoch_idx) + training_parameters["output_file"]))
         accuracy = inference(model, training_parameters, config, dataset="amzn", percentage=1).item()
         print("Accuracy on amazon after epoch " + str(epoch_idx) + " is " + str(accuracy))
 
@@ -287,8 +287,8 @@ def main():
     }
 
     training_params = {
-        "batch_size": 2,
-        "epochs": 1,
+        "batch_size": 8,
+        "epochs": 11,
         "output_folder": "./models/",
         "output_file": "model.pt",
         "learning_rate": 2e-5,
