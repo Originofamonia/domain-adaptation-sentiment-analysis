@@ -1,4 +1,4 @@
-import json, pprint, numpy as np, pandas as pd
+import pandas as pd
 
 
 def remove_tabs(x):
@@ -27,10 +27,7 @@ def preprocess_amzn(domain, split):
     filename = f'data/processed/{domain}/{split}.txt'
 
     amazon_df = pd.read_csv(filename, sep="\t")
-    # filterd_amazon_df = amazon_df[amazon_df["Score"] != 3]
 
-    # remove irrelevant reviews
-    # filterd_amazon_df = filterd_amazon_df[filterd_amazon_df['Review'].apply(lambda x: isinstance(x, str))]
     amazon_df["label"] = amazon_df["label"].apply(func)
 
     amazon_df["review"] = amazon_df["review"].apply(remove_tabs)
@@ -39,15 +36,15 @@ def preprocess_amzn(domain, split):
 
 
 def main():
-    imdb_train_df = preprocess_imdb("train")
-    imdb_dev_df = preprocess_imdb("test")
-    imdb_train_df.to_csv("./data/imdb_train.tsv", sep="\t", index=False)
-    imdb_dev_df.to_csv("./data/imdb_dev.tsv", sep="\t", index=False)
-    print(imdb_train_df.head())
-    print(imdb_train_df.shape)
-    print(imdb_dev_df.head())
-    print(imdb_dev_df.shape)
-    domain = 'books'
+    # imdb_train_df = preprocess_imdb("train")
+    # imdb_dev_df = preprocess_imdb("test")
+    # imdb_train_df.to_csv("./data/imdb_train.tsv", sep="\t", index=False)
+    # imdb_dev_df.to_csv("./data/imdb_dev.tsv", sep="\t", index=False)
+    # print(imdb_train_df.head())
+    # print(imdb_train_df.shape)
+    # print(imdb_dev_df.head())
+    # print(imdb_dev_df.shape)
+    domain = 'dvd'
     amazon_train_df = preprocess_amzn(domain, "train")
     amazon_dev_df = preprocess_amzn(domain, "test")
 

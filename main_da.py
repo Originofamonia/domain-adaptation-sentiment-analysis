@@ -125,19 +125,22 @@ def compute_accuracy(logits, labels):
 
 def inference(model, training_parameters, config, dataset="imdb", percentage=5):
     device = config['device']
+    domain = config['domain']
     with torch.no_grad():
         predicted_labels_dict = {
             0: 0,
             1: 0,
         }
-
-        dev_df = pd.read_csv("./data/" + dataset + "_test.tsv", sep="\t")
+        if dataset == 'amzn':
+            dev_df = pd.read_csv(f"data/{dataset}_{domain}_test.tsv", sep="\t")
+        else:
+            dev_df = pd.read_csv(f"data/{dataset}_dev.tsv", sep="\t")
         data_size = dev_df.shape[0]
         selected_for_evaluation = int(data_size * percentage / 100)
         dev_df = dev_df.head(selected_for_evaluation)
         dataset = ReviewDataset(dev_df, config)
 
-        dataloader = DataLoader(dataset=dataset, batch_size=training_parameters["batch_size"], shuffle=True,
+        dataloader = DataLoader(dataset=dataset, batch_size=training_parameters["batch_size"], shuffle=False,
                                 num_workers=2)
 
         mean_accuracy = 0.0
@@ -162,7 +165,7 @@ def inference(model, training_parameters, config, dataset="imdb", percentage=5):
     return mean_accuracy / total_batches
 
 
-def training(training_parameters, config, source_dataloader, target_dataloader):
+def train(training_parameters, config, source_dataloader, target_dataloader):
     lr = training_parameters["learning_rate"]
     n_epochs = training_parameters["epochs"]
     device = config['device']
@@ -253,7 +256,7 @@ def training(training_parameters, config, source_dataloader, target_dataloader):
 
         torch.save(model.state_dict(), os.path.join(training_parameters["output_folder"],
                                                     "epoch_" + str(epoch_idx) + training_parameters["output_file"]))
-        accuracy = inference(model, training_parameters, config, dataset="amazon", percentage=1).item()
+        accuracy = inference(model, training_parameters, config, dataset="amzn", percentage=1).item()
         print("Accuracy on amazon after epoch " + str(epoch_idx) + " is " + str(accuracy))
 
         accuracy = inference(model, training_parameters, config, dataset="imdb", percentage=1).item()
@@ -262,27 +265,28 @@ def training(training_parameters, config, source_dataloader, target_dataloader):
     return model
 
 
-def evaluate_model(model, training_parameters, device,):
-    accuracy = inference(model, training_parameters, device, dataset="amazon", percentage=100).item()
+def evaluate_model(model, training_parameters, config):
+    accuracy = inference(model, training_parameters, config, dataset="amzn", percentage=100).item()
     print("Accuracy on full amazon is " + str(accuracy))
 
-    accuracy = inference(model, training_parameters, device, dataset="imdb", percentage=100).item()
+    accuracy = inference(model, training_parameters, config, dataset="imdb", percentage=100).item()
     print("Accuracy on full imdb is " + str(accuracy))
 
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    print(device)
+    domain = 'dvd'
 
     config = {
         'device': device,
+        'domain': domain,
         "num_labels": 2,
         "hidden_dropout_prob": 0.15,
         "hidden_size": 768,
         "max_length": 512,
     }
 
-    training_parameters = {
+    training_params = {
         "batch_size": 2,
         "epochs": 1,
         "output_folder": "./models/",
@@ -295,19 +299,19 @@ def main():
     imdb_df = pd.read_csv("./data/imdb_train.tsv", sep='\t')
     source_dataset = ReviewDataset(imdb_df, config)
     source_dataloader = DataLoader(dataset=source_dataset,
-                                   batch_size=training_parameters["batch_size"],
-                                   shuffle=True,
-                                   num_workers=2)
-    domain = 'books'
-    amazon_df = pd.read_csv(f"./data/amzn_{domain}_train.tsv", sep="\t")
-    target_dataset = ReviewDataset(amazon_df, config)
-    target_dataloader = DataLoader(dataset=target_dataset,
-                                   batch_size=training_parameters["batch_size"],
+                                   batch_size=training_params["batch_size"],
                                    shuffle=True,
                                    num_workers=2)
 
-    model = training(training_parameters, config, source_dataloader, target_dataloader)
-    evaluate_model(model, training_parameters, device, )
+    amazon_df = pd.read_csv(f"./data/amzn_{domain}_train.tsv", sep="\t")
+    target_dataset = ReviewDataset(amazon_df, config)
+    target_dataloader = DataLoader(dataset=target_dataset,
+                                   batch_size=training_params["batch_size"],
+                                   shuffle=True,
+                                   num_workers=2)
+
+    model = train(training_params, config, source_dataloader, target_dataloader)
+    evaluate_model(model, training_params, config)
 
 
 if __name__ == '__main__':
