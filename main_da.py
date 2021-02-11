@@ -164,7 +164,7 @@ def inference(model, training_parameters, config, percentage=5):
             mean_accuracy += accuracy
             predicted_labels_dict[0] += predicted_labels[0]
             predicted_labels_dict[1] += predicted_labels[1]
-        print(predicted_labels_dict)
+        # print(predicted_labels_dict)
     return mean_accuracy / total_batches
 
 
@@ -233,7 +233,7 @@ def train_src(training_params, config, src_dataloader):
 
         # Evaluate the model after every epoch
         accuracy = inference(model, training_params, config, percentage=1).item()
-        print(f"Accuracy on tgt eval set {config['tgt_domain']} after epoch {epoch_idx} is {accuracy}")
+        print(f"Accuracy on tgt eval set {config['tgt_domain']} after epoch {epoch_idx} is {accuracy:.4f}")
 
         # torch.save(model.state_dict(), os.path.join(training_parameters["output_folder"],
         #                                             "epoch_" + str(epoch_idx) + training_parameters["output_file"]))
@@ -335,7 +335,7 @@ def train_tgt(training_params, config, src_dataloader, tgt_dataloader):
 
         # Evaluate the model after every epoch
         accuracy = inference(model, training_params, config, percentage=100).item()
-        print(f"Accuracy on tgt eval set {config['tgt_domain']} after epoch {epoch_idx} is {accuracy}")
+        print(f"Accuracy on tgt eval set {config['tgt_domain']} after epoch {epoch_idx} is {accuracy:.4f}")
 
         # torch.save(model.state_dict(), os.path.join(training_parameters["output_folder"],
         #                                             "epoch_" + str(epoch_idx) + training_parameters["output_file"]))
@@ -365,7 +365,7 @@ def main():
 
     training_params = {
         "batch_size": 4,
-        "epochs": 11,
+        "epochs": 100,
         "output_folder": "./models/",
         "output_file": "tgt_model.pt",
         "learning_rate": 2e-5,
@@ -393,10 +393,12 @@ def main():
     src_model = train_src(training_params, config, src_train_dataloader)
     print(f"train tgt model on {config['tgt_domain']}")
     tgt_model = train_tgt(training_params, config, src_train_dataloader, tgt_train_dataloader)
+
+    print(f"src data: {config['src_domain']}; tgt data: {config['tgt_domain']}")
     src_acc = evaluate_model(src_model, training_params, config)
-    print(f"src_model {config['src_domain']}'s accuracy on tgt eval set {config['tgt_domain']} is {src_acc}")
+    print(f"src_model {config['src_domain']}'s accuracy on tgt eval set {config['tgt_domain']} is {src_acc:.4f}")
     tgt_acc = evaluate_model(tgt_model, training_params, config)
-    print(f"tgt_model {config['tgt_domain']}'s accuracy on tgt eval set {config['tgt_domain']} is {tgt_acc}")
+    print(f"tgt_model {config['tgt_domain']}'s accuracy on tgt eval set {config['tgt_domain']} is {tgt_acc:.4f}")
 
 
 if __name__ == '__main__':
