@@ -369,7 +369,7 @@ def main():
         "output_folder": "./models/",
         "output_file": "tgt_model.pt",
         "learning_rate": 2e-5,
-        "print_after_steps": 5,
+        "print_after_steps": 10,
         "save_steps": 5000,
     }
 
