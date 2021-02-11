@@ -1,7 +1,9 @@
+# http://proceedings.mlr.press/v37/ganin15.pdf
+# https://medium.com/analytics-vidhya/domain-adaptation-for-sentiment-analysis-d1930e6548f4
 import torch
 from torch.utils.data import Dataset, DataLoader
 import numpy as np
-import math
+from tqdm import tqdm
 import os
 import pandas as pd
 import torch.nn as nn
@@ -29,7 +31,7 @@ class ReviewDataset(Dataset):
             add_special_tokens=True,
             truncation=True,
             max_length=self.config["max_length"],
-            pad_to_max_length=True,
+            padding='max_length',
             return_overflowing_tokens=True,
         )
         if "num_truncated_tokens" in encoded_input and encoded_input["num_truncated_tokens"] > 0:
@@ -124,18 +126,18 @@ def compute_accuracy(logits, labels):
     return acc, predicted_labels_dict
 
 
-def inference(model, training_parameters, config, dataset="imdb", percentage=5):
+def inference(model, training_parameters, config, percentage=5):
     device = config['device']
-    domain = config['domain']
+    # src_domain = config['src_domain']
+    tgt_domain = config['tgt_domain']
     with torch.no_grad():
         predicted_labels_dict = {
             0: 0,
             1: 0,
         }
-        if dataset == 'amzn':
-            dev_df = pd.read_csv(f"data/{dataset}_{domain}_test.tsv", sep="\t")
-        else:
-            dev_df = pd.read_csv(f"data/{dataset}_dev.tsv", sep="\t")
+
+        dev_df = pd.read_csv(f"data/amzn_{tgt_domain}_test.tsv", sep="\t")
+
         data_size = dev_df.shape[0]
         selected_for_evaluation = int(data_size * percentage / 100)
         dev_df = dev_df.head(selected_for_evaluation)
@@ -166,12 +168,16 @@ def inference(model, training_parameters, config, dataset="imdb", percentage=5):
     return mean_accuracy / total_batches
 
 
-def train(training_parameters, config, source_dataloader, target_dataloader):
-    lr = training_parameters["learning_rate"]
-    n_epochs = training_parameters["epochs"]
+def train_tgt(training_params, config, src_dataloader, tgt_dataloader):
+    lr = training_params["learning_rate"]
+    n_epochs = training_params["epochs"]
     device = config['device']
 
     model = DomainAdaptationModel(config)
+    # if torch.cuda.device_count() > 1:
+    #     print('Let\'s use {} GPUs!'.format(torch.cuda.device_count()))
+    #     model = nn.DataParallel(model)
+
     model.to(device)
 
     optimizer = optim.Adam(model.parameters(), lr)
@@ -185,32 +191,29 @@ def train(training_parameters, config, source_dataloader, target_dataloader):
     In our case target dataset has more data. Hence, we will leverage the entire source dataset for training
 
     If we use the same approach in a case where the source dataset has more data then the target dataset then we will
-    under-utilize the labeled source dataset. In such a scenario it is better to reload the target dataset when it finishes
-    This will ensure that we are utilizing the entire source dataset to train our model.
+    under-utilize the labeled source dataset. In such a scenario it is better to reload the target dataset when it 
+    finishes. This will ensure that we are utilizing the entire source dataset to train our model.
     '''
 
-    max_batches = min(len(source_dataloader), len(target_dataloader))
+    max_batches = min(len(src_dataloader), len(tgt_dataloader))
 
     for epoch_idx in range(n_epochs):
 
-        source_iterator = iter(source_dataloader)
-        target_iterator = iter(target_dataloader)
+        src_iter = iter(src_dataloader)
+        tgt_iter = iter(tgt_dataloader)
 
-        for batch_idx in range(max_batches):
+        pbar = tqdm(range(max_batches))
+        for batch_idx in pbar:
 
-            p = float(batch_idx + epoch_idx * max_batches) / (training_parameters["epochs"] * max_batches)
+            p = float(batch_idx + epoch_idx * max_batches) / (training_params["epochs"] * max_batches)
             grl_lambda = 2. / (1. + np.exp(-10 * p)) - 1
             grl_lambda = torch.tensor(grl_lambda)
 
             model.train()
-
-            if batch_idx % training_parameters["print_after_steps"] == 0:
-                print("Training Step:", batch_idx)
-
             optimizer.zero_grad()
 
-            # Souce dataset training update
-            input_ids, attention_mask, token_type_ids, labels = next(source_iterator)
+            # Source dataset training update
+            input_ids, attention_mask, token_type_ids, labels = next(src_iter)
             inputs = {
                 "input_ids": input_ids,
                 "attention_mask": attention_mask,
@@ -224,11 +227,11 @@ def train(training_parameters, config, source_dataloader, target_dataloader):
 
             sentiment_pred, domain_pred = model(**inputs)
             loss_s_sentiment = loss_fn_sentiment_classifier(sentiment_pred, inputs["labels"])
-            y_s_domain = torch.zeros(training_parameters["batch_size"], dtype=torch.long).to(device)
+            y_s_domain = torch.zeros(training_params["batch_size"], dtype=torch.long).to(device)
             loss_s_domain = loss_fn_domain_classifier(domain_pred, y_s_domain)
 
             # Target dataset training update
-            input_ids, attention_mask, token_type_ids, labels = next(target_iterator)
+            input_ids, attention_mask, token_type_ids, labels = next(tgt_iter)
             inputs = {
                 "input_ids": input_ids,
                 "attention_mask": attention_mask,
@@ -243,43 +246,48 @@ def train(training_parameters, config, source_dataloader, target_dataloader):
             _, domain_pred = model(**inputs)
 
             # Note that we are not using the sentiment predictions here for updating the weights
-            y_t_domain = torch.ones(training_parameters["batch_size"], dtype=torch.long).to(device)
-            print(domain_pred.size(), y_t_domain.size())
+            y_t_domain = torch.ones(training_params["batch_size"], dtype=torch.long).to(device)
+            # print(domain_pred.size(), y_t_domain.size())
             loss_t_domain = loss_fn_domain_classifier(domain_pred, y_t_domain)
 
             # Combining the loss
-
             loss = loss_s_sentiment + loss_s_domain + loss_t_domain
+            if batch_idx % training_params["print_after_steps"] == 0:
+                desc = f'E: {epoch_idx}/{n_epochs} step: {batch_idx}/{max_batches} loss={loss:.4f} ' \
+                       f'loss_s_sentiment={loss_s_sentiment:.4f} loss_s_domain={loss_s_domain:.4f} ' \
+                       f'loss_t_domain={loss_t_domain:.4f}'
+                pbar.set_description(desc=desc)
+
             loss.backward()
             optimizer.step()
 
         # Evaluate the model after every epoch
+        accuracy = inference(model, training_params, config, percentage=1).item()
+        print(f"Accuracy on tgt eval set {config['tgt_domain']} after epoch {epoch_idx} is {accuracy}")
+
         # torch.save(model.state_dict(), os.path.join(training_parameters["output_folder"],
         #                                             "epoch_" + str(epoch_idx) + training_parameters["output_file"]))
-        accuracy = inference(model, training_parameters, config, dataset="amzn", percentage=1).item()
-        print("Accuracy on amazon after epoch " + str(epoch_idx) + " is " + str(accuracy))
-
-        accuracy = inference(model, training_parameters, config, dataset="imdb", percentage=1).item()
-        print("Accuracy on imdb after epoch " + str(epoch_idx) + " is " + str(accuracy))
 
     return model
 
 
-def evaluate_model(model, training_parameters, config):
-    accuracy = inference(model, training_parameters, config, dataset="amzn", percentage=100).item()
-    print("Accuracy on full amazon is " + str(accuracy))
+def evaluate_model(model, training_params, config):
+    accuracy = inference(model, training_params, config, percentage=100).item()
+    print(f"Accuracy on tgt eval set is {accuracy}")
 
-    accuracy = inference(model, training_parameters, config, dataset="imdb", percentage=100).item()
-    print("Accuracy on full imdb is " + str(accuracy))
+    # accuracy = inference(model, training_parameters, config, percentage=100).item()
+    # print("Accuracy on full imdb is " + str(accuracy))
 
 
 def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
-    domain = 'dvd'
+    src_domain = 'books'
+    tgt_domain = 'dvd'
 
     config = {
         'device': device,
-        'domain': domain,
+        'src_domain': src_domain,
+        'tgt_domain': tgt_domain,
         "num_labels": 2,
         "hidden_dropout_prob": 0.2,
         "hidden_size": 768,
@@ -287,33 +295,33 @@ def main():
     }
 
     training_params = {
-        "batch_size": 8,
+        "batch_size": 4,
         "epochs": 11,
         "output_folder": "./models/",
-        "output_file": "model.pt",
+        "output_file": "tgt_model.pt",
         "learning_rate": 2e-5,
         "print_after_steps": 5,
         "save_steps": 5000,
     }
 
-    imdb_df = pd.read_csv("./data/imdb_train.tsv", sep='\t')
-    source_dataset = ReviewDataset(imdb_df, config)
+    src_df = pd.read_csv(f"data/amzn_{src_domain}_train.tsv", sep='\t')
+    source_dataset = ReviewDataset(src_df, config)
     source_dataloader = DataLoader(dataset=source_dataset,
                                    batch_size=training_params["batch_size"],
                                    shuffle=True,
                                    drop_last=True,
                                    num_workers=2)
 
-    amazon_df = pd.read_csv(f"./data/amzn_{domain}_train.tsv", sep="\t")
-    target_dataset = ReviewDataset(amazon_df, config)
+    tgt_df = pd.read_csv(f"data/amzn_{tgt_domain}_train.tsv", sep="\t")
+    target_dataset = ReviewDataset(tgt_df, config)
     target_dataloader = DataLoader(dataset=target_dataset,
                                    batch_size=training_params["batch_size"],
                                    shuffle=True,
                                    drop_last=True,
                                    num_workers=2)
 
-    model = train(training_params, config, source_dataloader, target_dataloader)
-    evaluate_model(model, training_params, config)
+    tgt_model = train_tgt(training_params, config, source_dataloader, target_dataloader)
+    evaluate_model(tgt_model, training_params, config)
 
 
 if __name__ == '__main__':

@@ -44,7 +44,7 @@ def main():
     # print(imdb_train_df.shape)
     # print(imdb_dev_df.head())
     # print(imdb_dev_df.shape)
-    domain = 'dvd'
+    domain = 'kitchen'
     amazon_train_df = preprocess_amzn(domain, "train")
     amazon_dev_df = preprocess_amzn(domain, "test")
 
