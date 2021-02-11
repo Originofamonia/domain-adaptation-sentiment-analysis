@@ -168,6 +168,79 @@ def inference(model, training_parameters, config, percentage=5):
     return mean_accuracy / total_batches
 
 
+def train_src(training_params, config, src_dataloader):
+    lr = training_params["learning_rate"]
+    n_epochs = training_params["epochs"]
+    device = config['device']
+
+    model = DomainAdaptationModel(config)
+    # if torch.cuda.device_count() > 1:
+    #     print('Let\'s use {} GPUs!'.format(torch.cuda.device_count()))
+    #     model = nn.DataParallel(model)
+
+    model.to(device)
+
+    optimizer = optim.Adam(model.parameters(), lr)
+    loss_fn_sentiment_classifier = torch.nn.NLLLoss()
+    '''
+    In one training step we will update the model using both the source labeled data and target unlabeled data
+    We will run it till the batches last for any of these datasets
+
+    In our case target dataset has more data. Hence, we will leverage the entire source dataset for training
+
+    If we use the same approach in a case where the source dataset has more data then the target dataset then we will
+    under-utilize the labeled source dataset. In such a scenario it is better to reload the target dataset when it 
+    finishes. This will ensure that we are utilizing the entire source dataset to train our model.
+    '''
+    num_batches = len(src_dataloader)
+
+    for epoch_idx in range(n_epochs):
+
+        src_iter = iter(src_dataloader)
+        pbar = tqdm(range(num_batches))
+
+        for batch_idx in pbar:
+            p = float(batch_idx + epoch_idx * num_batches) / (training_params["epochs"] * num_batches)
+            grl_lambda = 2. / (1. + np.exp(-10 * p)) - 1
+            grl_lambda = torch.tensor(grl_lambda)
+
+            model.train()
+            optimizer.zero_grad()
+
+            # Source dataset training update
+            input_ids, attention_mask, token_type_ids, labels = next(src_iter)
+            inputs = {
+                "input_ids": input_ids,
+                "attention_mask": attention_mask,
+                "token_type_ids": token_type_ids,
+                "labels": labels,
+                "grl_lambda": grl_lambda,
+            }
+
+            for k, v in inputs.items():
+                inputs[k] = v.to(device)
+
+            sentiment_pred, domain_pred = model(**inputs)
+            loss_s_sentiment = loss_fn_sentiment_classifier(sentiment_pred, inputs["labels"])
+
+            if batch_idx % training_params["print_after_steps"] == 0:
+                desc = f'E: {epoch_idx}/{n_epochs} step: {batch_idx}/{num_batches} ' \
+                       f'loss_s_sentiment={loss_s_sentiment:.4f}'
+                pbar.set_description(desc=desc)
+
+            loss_s_sentiment.backward()
+            optimizer.step()
+
+        # Evaluate the model after every epoch
+        accuracy = inference(model, training_params, config, percentage=1).item()
+        print(f"Accuracy on tgt eval set {config['tgt_domain']} after epoch {epoch_idx} is {accuracy}")
+
+        # torch.save(model.state_dict(), os.path.join(training_parameters["output_folder"],
+        #                                             "epoch_" + str(epoch_idx) + training_parameters["output_file"]))
+
+    return model
+
+
 def train_tgt(training_params, config, src_dataloader, tgt_dataloader):
     lr = training_params["learning_rate"]
     n_epochs = training_params["epochs"]
@@ -204,7 +277,6 @@ def train_tgt(training_params, config, src_dataloader, tgt_dataloader):
 
         pbar = tqdm(range(max_batches))
         for batch_idx in pbar:
-
             p = float(batch_idx + epoch_idx * max_batches) / (training_params["epochs"] * max_batches)
             grl_lambda = 2. / (1. + np.exp(-10 * p)) - 1
             grl_lambda = torch.tensor(grl_lambda)
@@ -253,16 +325,16 @@ def train_tgt(training_params, config, src_dataloader, tgt_dataloader):
             # Combining the loss
             loss = loss_s_sentiment + loss_s_domain + loss_t_domain
             if batch_idx % training_params["print_after_steps"] == 0:
-                desc = f'E: {epoch_idx}/{n_epochs} step: {batch_idx}/{max_batches} loss={loss:.4f} ' \
-                       f'loss_s_sentiment={loss_s_sentiment:.4f} loss_s_domain={loss_s_domain:.4f} ' \
-                       f'loss_t_domain={loss_t_domain:.4f}'
+                desc = f'E: {epoch_idx}/{n_epochs} step: {batch_idx}/{max_batches} l={loss:.4f} ' \
+                       f'l_s_s={loss_s_sentiment:.4f} l_s_d={loss_s_domain:.4f} ' \
+                       f'l_t_d={loss_t_domain:.4f}'
                 pbar.set_description(desc=desc)
 
             loss.backward()
             optimizer.step()
 
         # Evaluate the model after every epoch
-        accuracy = inference(model, training_params, config, percentage=1).item()
+        accuracy = inference(model, training_params, config, percentage=100).item()
         print(f"Accuracy on tgt eval set {config['tgt_domain']} after epoch {epoch_idx} is {accuracy}")
 
         # torch.save(model.state_dict(), os.path.join(training_parameters["output_folder"],
@@ -273,10 +345,7 @@ def train_tgt(training_params, config, src_dataloader, tgt_dataloader):
 
 def evaluate_model(model, training_params, config):
     accuracy = inference(model, training_params, config, percentage=100).item()
-    print(f"Accuracy on tgt eval set is {accuracy}")
-
-    # accuracy = inference(model, training_parameters, config, percentage=100).item()
-    # print("Accuracy on full imdb is " + str(accuracy))
+    return accuracy
 
 
 def main():
@@ -306,22 +375,28 @@ def main():
 
     src_df = pd.read_csv(f"data/amzn_{src_domain}_train.tsv", sep='\t')
     source_dataset = ReviewDataset(src_df, config)
-    source_dataloader = DataLoader(dataset=source_dataset,
-                                   batch_size=training_params["batch_size"],
-                                   shuffle=True,
-                                   drop_last=True,
-                                   num_workers=2)
+    src_train_dataloader = DataLoader(dataset=source_dataset,
+                                      batch_size=training_params["batch_size"],
+                                      shuffle=True,
+                                      drop_last=True,
+                                      num_workers=2)
 
     tgt_df = pd.read_csv(f"data/amzn_{tgt_domain}_train.tsv", sep="\t")
     target_dataset = ReviewDataset(tgt_df, config)
-    target_dataloader = DataLoader(dataset=target_dataset,
-                                   batch_size=training_params["batch_size"],
-                                   shuffle=True,
-                                   drop_last=True,
-                                   num_workers=2)
+    tgt_train_dataloader = DataLoader(dataset=target_dataset,
+                                      batch_size=training_params["batch_size"],
+                                      shuffle=True,
+                                      drop_last=True,
+                                      num_workers=2)
 
-    tgt_model = train_tgt(training_params, config, source_dataloader, target_dataloader)
-    evaluate_model(tgt_model, training_params, config)
+    print(f"train src model on {config['src_domain']}")
+    src_model = train_src(training_params, config, src_train_dataloader)
+    print(f"train tgt model on {config['tgt_domain']}")
+    tgt_model = train_tgt(training_params, config, src_train_dataloader, tgt_train_dataloader)
+    src_acc = evaluate_model(src_model, training_params, config)
+    print(f"src_model {config['src_domain']}'s accuracy on tgt eval set {config['tgt_domain']} is {src_acc}")
+    tgt_acc = evaluate_model(tgt_model, training_params, config)
+    print(f"tgt_model {config['tgt_domain']}'s accuracy on tgt eval set {config['tgt_domain']} is {tgt_acc}")
 
 
 if __name__ == '__main__':
